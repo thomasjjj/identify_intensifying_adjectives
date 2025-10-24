@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Set
 import math
+import sys
 
 
 @dataclass
@@ -23,7 +24,7 @@ class IntensifierScore:
 
 class TextIntensificationComparator:
     def __init__(self):
-        # Load spaCy model with word vectors (auto-download if missing)
+        # Load the required spaCy model with word vectors
         self.nlp = self._load_or_download_spacy_model()
 
         # Seed words for each intensification type
@@ -46,66 +47,15 @@ class TextIntensificationComparator:
         self.semantic_threshold = 0.55  # Lowered for better recall
 
     def _load_or_download_spacy_model(self):
-        """Load spaCy model, downloading if necessary."""
-        import subprocess
-        import sys
-
-        # Try to load the large model first
+        """Load the required spaCy model or exit with instructions."""
         try:
             nlp = spacy.load("en_core_web_lg")
             print("✓ Loaded en_core_web_lg model")
             return nlp
         except OSError:
-            print("⚠️  en_core_web_lg not found, trying en_core_web_sm...")
-
-        # Try to load the small model
-        try:
-            nlp = spacy.load("en_core_web_sm")
-            print("✓ Loaded en_core_web_sm model (reduced accuracy)")
-            print("💡 For better results, run: python -m spacy download en_core_web_lg")
-            return nlp
-        except OSError:
-            print("📥 No spaCy model found. Downloading en_core_web_sm automatically...")
-
-            try:
-                # Download the small model automatically
-                subprocess.check_call([
-                    sys.executable, "-m", "spacy", "download", "en_core_web_sm"
-                ], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-
-                print("✅ Successfully downloaded en_core_web_sm!")
-                nlp = spacy.load("en_core_web_sm")
-                print("✓ Model loaded and ready to use")
-                return nlp
-
-            except subprocess.CalledProcessError as e:
-                print("❌ Failed to download spaCy model automatically.")
-                print("Please install manually with:")
-                print("  pip install spacy")
-                print("  python -m spacy download en_core_web_sm")
-                raise RuntimeError("Could not load or download spaCy model") from e
-            except Exception as e:
-                print(f"❌ Unexpected error: {e}")
-                print("Please install spaCy model manually:")
-                print("  pip install spacy")
-                print("  python -m spacy download en_core_web_sm")
-                raise
-
-        # Seed words for each intensification type
-        self.seed_vectors = {
-            'magnitude': ['enormous', 'massive', 'tremendous', 'substantial', 'significant'],
-            'extremity': ['unprecedented', 'extraordinary', 'remarkable', 'outstanding'],
-            'urgency': ['critical', 'crucial', 'vital', 'urgent', 'imperative'],
-            'impact': ['groundbreaking', 'revolutionary', 'transformative', 'game-changing'],
-            'emotion': ['alarming', 'stunning', 'devastating', 'compelling', 'dramatic'],
-            'comprehensiveness': ['comprehensive', 'extensive', 'thorough', 'detailed', 'exhaustive']
-        }
-
-        # Build semantic vectors for each category
-        self._build_semantic_vectors()
-
-        # Thresholds
-        self.semantic_threshold = 0.55  # Lowered for better recall
+            print("❌ The spaCy model 'en_core_web_lg' is not installed.")
+            print("   Please install it by running: python -m spacy download en_core_web_lg")
+            sys.exit(1)
 
     def _build_semantic_vectors(self):
         """Build average vectors for each intensification category."""
