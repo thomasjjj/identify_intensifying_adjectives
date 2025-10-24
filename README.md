@@ -26,7 +26,7 @@ This tool analyzes text for "intensifying adjectives" - dramatic modifiers that 
 ```bash
 # Clone or download the script
 # Install dependencies
-pip install spacy numpy
+pip install -r requirements.txt
 
 # Download the required spaCy language model once
 python -m spacy download en_core_web_lg

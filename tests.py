@@ -198,6 +198,20 @@ class TestIntensifierDetection(unittest.TestCase):
         self.assertIn('biggest', detected_words, "Should detect 'biggest'")
         self.assertIn('greatest', detected_words, "Should detect 'greatest'")
 
+    def test_adverb_intensification_detection(self):
+        """Test detection of intensifying adverbs."""
+        text = "The proposal is highly effective and deeply concerning, absolutely demanding immediate action."
+        analysis = self.comparator.analyze_text(text, "Adverb Sample")
+
+        self.assertGreaterEqual(analysis['intensifying_adverbs'], 2,
+                                "Should detect multiple intensifying adverbs")
+        self.assertGreater(analysis['adv_intensification_rate'], 0,
+                           "Adverb intensification rate should be greater than zero")
+        detected_adverbs = [score.word.lower() for score in analysis['detailed_intensifiers'] if score.part_of_speech == 'ADV']
+        for expected in ['highly', 'deeply', 'absolutely']:
+            self.assertIn(expected, detected_adverbs,
+                          f"Should detect intensifying adverb '{expected}'")
+
     def test_empty_text_handling(self):
         """Test handling of empty or minimal text."""
         analysis = self.comparator.analyze_text(TestTextSamples.EMPTY_TEXT, "Empty")
