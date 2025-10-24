@@ -20,6 +20,7 @@ This tool analyzes text for "intensifying adjectives" - dramatic modifiers that 
 - Python 3.7+
 - spaCy
 - NumPy
+- spaCy language model: `en_core_web_lg`
 
 ### Setup
 ```bash
@@ -27,11 +28,8 @@ This tool analyzes text for "intensifying adjectives" - dramatic modifiers that 
 # Install dependencies
 pip install -r requirements.txt
 
-# Download spaCy language model (recommended)
+# Download the required spaCy language model once
 python -m spacy download en_core_web_lg
-
-# Or use the smaller model if needed
-python -m spacy download en_core_web_sm
 ```
 
 ## Usage
@@ -154,7 +152,7 @@ The tool recognizes six categories of intensification:
 - **Comprehensiveness**: comprehensive, extensive, thorough, detailed
 
 ### Accuracy Notes
-- Best results with the `en_core_web_lg` spaCy model
+- Requires the `en_core_web_lg` spaCy model (install with `python -m spacy download en_core_web_lg`)
 - Accuracy improves with longer text samples (50+ words)
 - False positives possible with legitimately dramatic content (breaking news, etc.)
 - The tool is optimized for detecting "lazy" AI generation, not sophisticated prompt engineering
