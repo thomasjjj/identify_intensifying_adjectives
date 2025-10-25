@@ -428,14 +428,16 @@ def main():
     print(f"Success rate: {(result.testsRun - len(result.failures) - len(result.errors)) / result.testsRun:.1%}")
 
     if result.failures:
-        print(f"\n❌ FAILURES:")
+        print("\n❌ FAILURES:")
         for test, traceback in result.failures:
-            print(f"  - {test}: {traceback.split('AssertionError: ')[-1].split('\\n')[0]}")
+            message = traceback.split("AssertionError: ")[-1].splitlines()[0]
+            print(f"  - {test}: {message}")
 
     if result.errors:
-        print(f"\n🚨 ERRORS:")
+        print("\n🚨 ERRORS:")
         for test, traceback in result.errors:
-            print(f"  - {test}: {traceback.split('\\n')[-2]}")
+            message = traceback.splitlines()[-2] if "\n" in traceback else traceback
+            print(f"  - {test}: {message}")
 
     # Run additional benchmarks
     run_performance_benchmark()
