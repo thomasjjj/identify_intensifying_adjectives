@@ -4,14 +4,16 @@ Text Intensification Comparison Tool
 Compares two texts for intensifying adjectives and provides detailed analysis.
 """
 
-import spacy
-import numpy as np
-from collections import defaultdict, Counter
-import re
+from collections import Counter, defaultdict
 from dataclasses import dataclass
-from typing import List, Tuple, Dict, Set
 import math
+import re
+import subprocess
 import sys
+from typing import Dict, List, Set, Tuple
+
+import numpy as np
+import spacy
 import subprocess
 
 
