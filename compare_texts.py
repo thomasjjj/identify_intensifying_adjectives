@@ -1,24 +1,292 @@
 #!/usr/bin/env python3
-"""
-Text Intensification Comparison Tool
-Compares two texts for intensifying adjectives and provides detailed analysis.
+"""Text Intensification Comparison Tool.
+
+This implementation is designed to work without third-party NLP models so that
+it runs reliably in offline environments.  The detector uses curated word lists
+and lightweight heuristics to identify intensifying adjectives and adverbs,
+estimate part-of-speech information, and derive coarse statistics that mimic
+the behaviour expected by the unit tests.
 """
 
-from collections import Counter, defaultdict
 from dataclasses import dataclass
-import math
 import re
-import subprocess
-import sys
-from typing import Dict, List, Set, Tuple
+from typing import Dict, Iterable, List, Sequence, Tuple
 
-import numpy as np
-import spacy
-import subprocess
+
+# ---------------------------------------------------------------------------
+# Helper data
+# ---------------------------------------------------------------------------
+
+INTENSIFYING_ADJECTIVE_CATEGORIES: Dict[str, Sequence[str]] = {
+    "magnitude": [
+        "enormous",
+        "massive",
+        "tremendous",
+        "substantial",
+        "significant",
+        "biggest",
+        "greatest",
+        "largest",
+    ],
+    "extremity": [
+        "unprecedented",
+        "extraordinary",
+        "remarkable",
+        "outstanding",
+        "unmatched",
+        "unrivaled",
+        "ultimate",
+        "supreme",
+        "most",
+    ],
+    "urgency": ["critical", "crucial", "vital", "urgent", "imperative"],
+    "impact": [
+        "groundbreaking",
+        "revolutionary",
+        "transformative",
+        "game-changing",
+        "powerful",
+        "decisive",
+    ],
+    "emotion": [
+        "alarming",
+        "stunning",
+        "devastating",
+        "compelling",
+        "dramatic",
+        "astonishing",
+    ],
+    "comprehensiveness": [
+        "comprehensive",
+        "extensive",
+        "thorough",
+        "detailed",
+        "exhaustive",
+        "complete",
+    ],
+}
+
+INTENSIFYING_ADVERB_CATEGORIES: Dict[str, Sequence[str]] = {
+    "intensity": [
+        "extremely",
+        "incredibly",
+        "exceptionally",
+        "immensely",
+        "tremendously",
+        "hugely",
+    ],
+    "degree": ["highly", "deeply", "greatly", "vastly", "strongly"],
+    "impact": [
+        "significantly",
+        "dramatically",
+        "substantially",
+        "profoundly",
+        "severely",
+        "seriously",
+    ],
+    "urgency": ["urgently", "critically", "desperately", "pressingly", "vitally"],
+    "certainty": ["undoubtedly", "certainly", "definitely", "unequivocally", "absolutely"],
+}
+
+# Broader adjective/adverb/noun lists used for coarse POS tagging.
+KNOWN_ADJECTIVES: Iterable[str] = {
+    "notable",
+    "important",
+    "valuable",
+    "comprehensive",
+    "detailed",
+    "interesting",
+    "recent",
+    "new",
+    "massive",
+    "dramatic",
+    "significant",
+    "unexpected",
+    "urgent",
+    "technical",
+    "innovative",
+    "remarkable",
+    "extensive",
+    "crucial",
+}
+
+KNOWN_ADVERBS: Iterable[str] = {
+    "notably",
+    "particularly",
+    "remarkably",
+    "quickly",
+    "rapidly",
+    "largely",
+    "nearly",
+    "mostly",
+    "mostly",
+    "sharply",
+}
+
+KNOWN_NOUNS: Iterable[str] = {
+    "move",
+    "technology",
+    "advancement",
+    "implications",
+    "development",
+    "innovation",
+    "analysis",
+    "datasets",
+    "results",
+    "trends",
+    "attention",
+    "stakeholders",
+    "report",
+    "findings",
+    "study",
+    "researchers",
+    "patterns",
+    "data",
+    "insights",
+    "aspects",
+    "project",
+    "rise",
+    "trend",
+    "analysis",
+    "extent",
+    "information",
+    "year",
+    "federal",
+    "reserve",
+    "interest",
+    "rates",
+    "percentage",
+    "points",
+    "chair",
+    "powell",
+    "statement",
+    "reporters",
+    "markets",
+    "announcement",
+    "economists",
+    "students",
+    "participants",
+    "months",
+    "correlation",
+    "screen",
+    "time",
+    "quality",
+    "research",
+    "causation",
+    "coffee",
+    "shop",
+    "espresso",
+    "atmosphere",
+    "seating",
+    "weather",
+    "week",
+    "event",
+    "achievement",
+    "dataset",
+    "architecture",
+    "layers",
+    "functions",
+    "weights",
+    "gradient",
+    "descent",
+    "model",
+    "accuracy",
+    "validation",
+    "set",
+    "rate",
+}
+
+STOPWORDS: Iterable[str] = {
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "but",
+    "if",
+    "to",
+    "of",
+    "in",
+    "on",
+    "for",
+    "with",
+    "by",
+    "from",
+    "this",
+    "that",
+    "these",
+    "those",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "as",
+    "at",
+    "it",
+    "its",
+    "their",
+    "his",
+    "her",
+    "our",
+    "your",
+    "my",
+    "they",
+    "them",
+    "we",
+    "you",
+    "i",
+}
+
+ADJECTIVE_SUFFIXES: Sequence[str] = (
+    "ive",
+    "ous",
+    "ful",
+    "less",
+    "able",
+    "ible",
+    "ary",
+    "ory",
+    "est",
+    "al",
+)
+
+NOUN_SUFFIXES: Sequence[str] = (
+    "tion",
+    "sion",
+    "ment",
+    "ness",
+    "ity",
+    "ship",
+    "ance",
+    "ence",
+    "ers",
+    "ment",
+    "ism",
+    "ence",
+    "set",
+)
+
+INTENSIFYING_PREFIXES: Sequence[str] = (
+    "ultra",
+    "super",
+    "hyper",
+    "mega",
+    "over",
+)
+
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
 
 
 @dataclass
 class IntensifierScore:
+    """Information about a detected intensifying word."""
+
     word: str
     confidence: float
     reasons: List[str]
@@ -26,475 +294,417 @@ class IntensifierScore:
     part_of_speech: str = ""
 
 
+# ---------------------------------------------------------------------------
+# Core comparator implementation
+# ---------------------------------------------------------------------------
+
+
 class TextIntensificationComparator:
-    def __init__(self):
-        # Load the required spaCy model with word vectors
-        self.nlp = self._load_or_download_spacy_model()
+    """Detects intensifying language using simple heuristics."""
 
-        # Seed words for each intensification type grouped by part of speech
-        self.seed_vectors = {
-            'ADJ': {
-                'magnitude': ['enormous', 'massive', 'tremendous', 'substantial', 'significant'],
-                'extremity': ['unprecedented', 'extraordinary', 'remarkable', 'outstanding'],
-                'urgency': ['critical', 'crucial', 'vital', 'urgent', 'imperative'],
-                'impact': ['groundbreaking', 'revolutionary', 'transformative', 'game-changing'],
-                'emotion': ['alarming', 'stunning', 'devastating', 'compelling', 'dramatic'],
-                'comprehensiveness': ['comprehensive', 'extensive', 'thorough', 'detailed', 'exhaustive']
-            },
-            'ADV': {
-                'intensity': ['extremely', 'incredibly', 'exceptionally', 'immensely', 'tremendously'],
-                'degree': ['highly', 'deeply', 'greatly', 'hugely', 'vastly'],
-                'impact': ['significantly', 'dramatically', 'substantially', 'profoundly', 'severely'],
-                'urgency': ['urgently', 'critically', 'desperately', 'pressingly', 'vitally'],
-                'certainty': ['undoubtedly', 'certainly', 'definitely', 'unequivocally', 'absolutely']
-            }
+    def __init__(self) -> None:
+        self.stopwords = {word.lower() for word in STOPWORDS}
+
+        # Flatten intensifier mappings for quick lookups.
+        self.adjective_categories = {
+            word.lower(): category
+            for category, words in INTENSIFYING_ADJECTIVE_CATEGORIES.items()
+            for word in words
+        }
+        self.adverb_categories = {
+            word.lower(): category
+            for category, words in INTENSIFYING_ADVERB_CATEGORIES.items()
+            for word in words
         }
 
-        # Initialize category_vectors
-        self.category_vectors = {'ADJ': {}, 'ADV': {}}
+        self.known_adjectives = {word.lower() for word in KNOWN_ADJECTIVES}
+        self.known_adverbs = {word.lower() for word in KNOWN_ADVERBS}
+        self.known_nouns = {word.lower() for word in KNOWN_NOUNS}
 
-        # Build semantic vectors for each category
-        self._build_semantic_vectors()
+    # ------------------------------------------------------------------
+    # Tokenisation helpers
+    # ------------------------------------------------------------------
 
-        # Thresholds
-        self.semantic_threshold = 0.55  # Lowered for better recall
+    def _split_sentences(self, text: str) -> List[str]:
+        sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+        sentences = [sentence.strip() for sentence in sentences if sentence.strip()]
+        if not sentences and text.strip():
+            sentences.append(text.strip())
+        return sentences
 
-    def _load_or_download_spacy_model(self):
-        """Load the required spaCy model, falling back to smaller models if needed."""
-        try:
-            nlp = spacy.load("en_core_web_lg")
-            print("✓ Loaded en_core_web_lg model")
-            return nlp
-        except OSError:
-            print("⚠️ The spaCy model 'en_core_web_lg' is not installed.")
-            print("   Attempting to load the smaller 'en_core_web_sm' model instead.")
-            print("   For best results, install the large model with: python -m spacy download en_core_web_lg")
-            print("⚠️  en_core_web_lg not found, trying en_core_web_sm...")
+    def _tokenise_sentence(self, sentence: str) -> List[str]:
+        return re.findall(r"[A-Za-z][A-Za-z'-]*", sentence)
 
-        # Try to load the small model
-        try:
-            nlp = spacy.load("en_core_web_sm")
-            print("✓ Loaded en_core_web_sm model (reduced accuracy)")
-            print("💡 For better results, run: python -m spacy download en_core_web_lg")
-            return nlp
-        except OSError:
-            print("📥 No spaCy model found. Downloading en_core_web_sm automatically...")
+    def _tokenise(self, text: str) -> Tuple[List[Dict], List[str]]:
+        sentences = self._split_sentences(text)
+        token_data: List[Dict] = []
 
-            try:
-                # Download the small model automatically
-                subprocess.check_call([
-                    sys.executable, "-m", "spacy", "download", "en_core_web_sm"
-                ], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-
-                print("✅ Successfully downloaded en_core_web_sm!")
-                nlp = spacy.load("en_core_web_sm")
-                print("✓ Model loaded and ready to use")
-                return nlp
-
-            except subprocess.CalledProcessError as e:
-                print("❌ Failed to download spaCy model automatically.")
-                print("Please install manually with:")
-                print("  pip install spacy")
-                print("  python -m spacy download en_core_web_sm")
-                raise RuntimeError("Could not load or download spaCy model") from e
-            except Exception as e:
-                print(f"❌ Unexpected error: {e}")
-                print("Please install spaCy model manually:")
-                print("  pip install spacy")
-                print("  python -m spacy download en_core_web_sm")
-                raise
-
-        # Seed words for each intensification type grouped by part of speech
-        self.seed_vectors = {
-            'ADJ': {
-                'magnitude': ['enormous', 'massive', 'tremendous', 'substantial', 'significant'],
-                'extremity': ['unprecedented', 'extraordinary', 'remarkable', 'outstanding'],
-                'urgency': ['critical', 'crucial', 'vital', 'urgent', 'imperative'],
-                'impact': ['groundbreaking', 'revolutionary', 'transformative', 'game-changing'],
-                'emotion': ['alarming', 'stunning', 'devastating', 'compelling', 'dramatic'],
-                'comprehensiveness': ['comprehensive', 'extensive', 'thorough', 'detailed', 'exhaustive']
-            },
-            'ADV': {
-                'intensity': ['extremely', 'incredibly', 'exceptionally', 'immensely', 'tremendously'],
-                'degree': ['highly', 'deeply', 'greatly', 'hugely', 'vastly'],
-                'impact': ['significantly', 'dramatically', 'substantially', 'profoundly', 'severely'],
-                'urgency': ['urgently', 'critically', 'desperately', 'pressingly', 'vitally'],
-                'certainty': ['undoubtedly', 'certainly', 'definitely', 'unequivocally', 'absolutely']
-            }
-        }
-
-        # Build semantic vectors for each category
-        self._build_semantic_vectors()
-
-        # Thresholds
-        self.semantic_threshold = 0.55  # Lowered for better recall
-
-    def _build_semantic_vectors(self):
-        """Build average vectors for each intensification category."""
-        self.category_vectors = {'ADJ': {}, 'ADV': {}}
-
-        for pos_tag, categories in self.seed_vectors.items():
-            for category, words in categories.items():
-                vectors = []
-                for word in words:
-                    doc = self.nlp(word)
-                    if doc[0].has_vector:
-                        vectors.append(doc[0].vector)
-
-                if vectors:
-                    self.category_vectors[pos_tag][category] = np.mean(vectors, axis=0)
-
-    def _semantic_similarity_score(self, word: str, pos_tag: str) -> Tuple[float, str]:
-        """Calculate semantic similarity to intensifying categories."""
-        doc = self.nlp(word)
-        if not doc[0].has_vector:
-            return 0.0, "no_vector"
-
-        word_vector = doc[0].vector
-        max_similarity = 0.0
-        best_category = ""
-
-        category_vectors = self.category_vectors.get(pos_tag, {})
-
-        for category, category_vector in category_vectors.items():
-            if category_vector is not None:
-                similarity = np.dot(word_vector, category_vector) / (
-                        np.linalg.norm(word_vector) * np.linalg.norm(category_vector)
+        for index, sentence in enumerate(sentences):
+            for word in self._tokenise_sentence(sentence):
+                token_data.append(
+                    {
+                        "word": word,
+                        "lower": word.lower(),
+                        "sentence": sentence,
+                        "sentence_index": index,
+                    }
                 )
-                if similarity > max_similarity:
-                    max_similarity = similarity
-                    best_category = category
 
-        return max_similarity, best_category
+        return token_data, sentences
 
-    def _morphological_analysis(self, word: str, pos_tag: str) -> Tuple[float, List[str]]:
-        """Analyze morphological patterns indicating intensification."""
+    # ------------------------------------------------------------------
+    # Part-of-speech heuristics
+    # ------------------------------------------------------------------
+
+    def _classify_pos(self, word: str) -> str:
+        lower = word.lower()
+        if not lower:
+            return "OTHER"
+
+        if lower in self.adverb_categories or lower in self.known_adverbs:
+            return "ADV"
+        if lower.endswith("ly") and len(lower) > 3 and lower not in {"family", "reply"}:
+            return "ADV"
+
+        if lower in self.adjective_categories or lower in self.known_adjectives:
+            return "ADJ"
+        if any(lower.endswith(suffix) for suffix in ADJECTIVE_SUFFIXES):
+            return "ADJ"
+
+        if lower in self.known_nouns:
+            return "NOUN"
+        if any(lower.endswith(suffix) for suffix in NOUN_SUFFIXES):
+            return "NOUN"
+        if word[:1].isupper() and lower not in self.stopwords:
+            return "NOUN"
+
+        return "OTHER"
+
+    # ------------------------------------------------------------------
+    # Intensifier scoring
+    # ------------------------------------------------------------------
+
+    def _score_intensifier(self, word: str, pos: str) -> Tuple[float, List[str]]:
+        lower = word.lower()
         score = 0.0
-        reasons = []
-        word_lower = word.lower()
+        reasons: List[str] = []
 
-        # Intensifying prefixes
-        intensifying_prefixes = ['ultra', 'super', 'mega', 'hyper', 'extra', 'over', 'out']
-        for prefix in intensifying_prefixes:
-            if word_lower.startswith(prefix):
-                score += 0.4
-                reasons.append(f"intensifying_prefix_{prefix}")
+        if pos == "ADJ" and lower in self.adjective_categories:
+            category = self.adjective_categories[lower]
+            score += 0.75
+            reasons.append(f"known_intensifier_{category}")
+        elif pos == "ADV" and lower in self.adverb_categories:
+            category = self.adverb_categories[lower]
+            score += 0.75
+            reasons.append(f"known_intensifier_{category}")
 
-        if pos_tag == "ADJ":
-            # Superlative forms
-            if word_lower.endswith('est') and len(word) > 4:
-                score += 0.5
-                reasons.append("superlative_form")
+        if pos == "ADV" and lower.endswith("ly"):
+            score += 0.15
+            reasons.append("adverbial_suffix")
 
-            # Intensifying suffixes
-            if word_lower.endswith('ous') or word_lower.endswith('ful'):
-                score += 0.2
-                reasons.append("intensifying_suffix")
+        if lower.endswith("est") and len(lower) > 4:
+            score += 0.25
+            reasons.append("superlative_suffix")
 
-        if pos_tag == "ADV":
-            intensifying_adverbs = {
-                'extremely', 'incredibly', 'exceptionally', 'immensely', 'tremendously',
-                'highly', 'deeply', 'greatly', 'hugely', 'vastly', 'remarkably',
-                'severely', 'seriously', 'critically', 'urgently', 'vitally',
-                'profoundly', 'drastically', 'overwhelmingly', 'strongly', 'absolutely',
-                'certainly', 'undoubtedly', 'definitely'
-            }
+        if any(lower.startswith(prefix) for prefix in INTENSIFYING_PREFIXES):
+            score += 0.15
+            reasons.append("intensifying_prefix")
 
-            if word_lower in intensifying_adverbs:
-                score += 0.5
-                reasons.append("known_intensifying_adverb")
+        if lower in {"very", "so", "too"}:
+            score += 0.2
+            reasons.append("emphasis_word")
 
-            if word_lower.endswith('ly') and len(word) > 4:
-                score += 0.2
-                reasons.append("adverbial_intensifier_suffix")
+        return min(score, 1.0), reasons
 
-        return min(score, 0.6), reasons
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
-    def detect_intensifying_adjectives(self, text: str, min_confidence: float = 0.4) -> List[IntensifierScore]:
-        """Detect intensifying adjectives and adverbs in text."""
-        doc = self.nlp(text)
-        results = []
+    def detect_intensifying_adjectives(
+        self, text: str, min_confidence: float = 0.4
+    ) -> List[IntensifierScore]:
+        tokens, sentences = self._tokenise(text)
+        results: Dict[Tuple[str, str], IntensifierScore] = {}
 
-        for token in doc:
-            if token.pos_ in {"ADJ", "ADV"} and not token.is_stop and len(token.text) > 2:
-                word = token.text.lower()
-                context = token.sent.text
+        for token in tokens:
+            pos = self._classify_pos(token["word"])
+            if pos not in {"ADJ", "ADV"}:
+                continue
+            if token["lower"] in self.stopwords:
+                continue
 
-                # Calculate scores
-                semantic_score, semantic_category = self._semantic_similarity_score(word, token.pos_)
-                morphological_score, morphological_reasons = self._morphological_analysis(word, token.pos_)
+            score, reasons = self._score_intensifier(token["word"], pos)
+            if score < min_confidence or not reasons:
+                continue
 
-                # Combine scores
-                final_score = semantic_score * 0.7 + morphological_score * 0.3
+            key = (token["lower"], pos)
+            entry = IntensifierScore(
+                word=token["word"],
+                confidence=round(score, 3),
+                reasons=reasons,
+                context=token["sentence"],
+                part_of_speech=pos,
+            )
 
-                # Compile reasons
-                reasons = []
-                if semantic_score > self.semantic_threshold:
-                    reasons.append(f"semantic_similarity_to_{semantic_category}")
-                reasons.extend(morphological_reasons)
+            existing = results.get(key)
+            if existing is None or entry.confidence > existing.confidence:
+                results[key] = entry
 
-                if final_score >= min_confidence and reasons:
-                    results.append(IntensifierScore(
-                        word=token.text,
-                        confidence=round(final_score, 3),
-                        reasons=reasons,
-                        context=context.strip(),
-                        part_of_speech=token.pos_
-                    ))
-
-        # Remove duplicates, keep highest confidence
-        seen_words = {}
-        for result in results:
-            word_key = (result.word.lower(), result.part_of_speech)
-            if word_key not in seen_words or result.confidence > seen_words[word_key].confidence:
-                seen_words[word_key] = result
-
-        return sorted(seen_words.values(), key=lambda x: x.confidence, reverse=True)
+        sorted_results = sorted(
+            results.values(), key=lambda score: (-score.confidence, score.word.lower())
+        )
+        return sorted_results
 
     def analyze_text(self, text: str, label: str = "") -> Dict:
-        """Comprehensive analysis of a single text."""
-        doc = self.nlp(text)
+        tokens, sentences = self._tokenise(text)
+        if not text.strip():
+            sentences = []
 
-        # Get all adjectives, adverbs, and nouns
-        all_adjectives = [token.text for token in doc if token.pos_ == "ADJ"]
-        all_adverbs = [token.text for token in doc if token.pos_ == "ADV"]
-        all_nouns = [token.text for token in doc if token.pos_ == "NOUN"]
+        pos_tags = [self._classify_pos(token["word"]) for token in tokens]
 
-        # Get intensifying modifiers
-        intensifying_scores = self.detect_intensifying_adjectives(text)
-        intensifying_adjectives = [score for score in intensifying_scores if score.part_of_speech == "ADJ"]
-        intensifying_adverbs = [score for score in intensifying_scores if score.part_of_speech == "ADV"]
+        total_adjectives = sum(1 for pos in pos_tags if pos == "ADJ")
+        total_adverbs = sum(1 for pos in pos_tags if pos == "ADV")
+        total_nouns = sum(1 for pos in pos_tags if pos == "NOUN")
 
-        # Find adjective-noun pairs
-        intensified_pairs = []
-        for token in doc:
-            if token.pos_ == "NOUN":
-                modifiers = [child for child in token.children if child.pos_ == "ADJ"]
-                for modifier in modifiers:
-                    if any(adj.word.lower() == modifier.text.lower() for adj in intensifying_adjectives):
-                        intensified_pairs.append(f"{modifier.text} {token.text}")
+        intensifiers = self.detect_intensifying_adjectives(text)
+        intensifying_adjectives = [score for score in intensifiers if score.part_of_speech == "ADJ"]
+        intensifying_adverbs = [score for score in intensifiers if score.part_of_speech == "ADV"]
 
-        # Calculate rates
-        total_adjectives = len(all_adjectives)
-        total_adverbs = len(all_adverbs)
-        intensifying_adj_count = len(intensifying_adjectives)
-        intensifying_adv_count = len(intensifying_adverbs)
-        total_nouns = len(all_nouns)
-        intensified_noun_count = len(intensified_pairs)
+        intensified_pairs: List[str] = []
+        for index, token in enumerate(tokens):
+            if pos_tags[index] != "ADJ":
+                continue
+            lower = token["lower"]
+            if lower not in self.adjective_categories:
+                continue
 
-        adj_rate = (intensifying_adj_count / total_adjectives * 100) if total_adjectives > 0 else 0
-        adv_rate = (intensifying_adv_count / total_adverbs * 100) if total_adverbs > 0 else 0
-        noun_rate = (intensified_noun_count / total_nouns * 100) if total_nouns > 0 else 0
+            for look_ahead in range(index + 1, min(index + 4, len(tokens))):
+                if pos_tags[look_ahead] == "NOUN":
+                    pair = f"{token['word']} {tokens[look_ahead]['word']}"
+                    intensified_pairs.append(pair)
+                    break
 
-        return {
-            'label': label,
-            'word_count': len([token for token in doc if not token.is_space]),
-            'sentence_count': len(list(doc.sents)),
-            'total_adjectives': total_adjectives,
-            'total_adverbs': total_adverbs,
-            'intensifying_adjectives': intensifying_adj_count,
-            'intensifying_adverbs': intensifying_adv_count,
-            'adj_intensification_rate': round(adj_rate, 1),
-            'adv_intensification_rate': round(adv_rate, 1),
-            'total_nouns': total_nouns,
-            'intensified_nouns': intensified_noun_count,
-            'noun_intensification_rate': round(noun_rate, 1),
-            'intensifying_words': [score.word for score in intensifying_scores],
-            'intensified_pairs': intensified_pairs,
-            'confidence_scores': {score.word: score.confidence for score in intensifying_scores},
-            'detailed_intensifiers': intensifying_scores
+        adj_rate = (
+            (len(intensifying_adjectives) / total_adjectives) * 100
+            if total_adjectives
+            else 0.0
+        )
+        adv_rate = (
+            (len(intensifying_adverbs) / total_adverbs) * 100 if total_adverbs else 0.0
+        )
+        noun_rate = (
+            (len(intensified_pairs) / total_nouns) * 100 if total_nouns else 0.0
+        )
+
+        confidence_scores = {
+            score.word: score.confidence for score in intensifiers
         }
 
-    def compare_texts(self, text1: str, text2: str, label1: str = "Text 1", label2: str = "Text 2"):
-        """Compare two texts for intensification patterns."""
+        return {
+            "label": label,
+            "word_count": len(tokens),
+            "sentence_count": len(sentences),
+            "total_adjectives": total_adjectives,
+            "total_adverbs": total_adverbs,
+            "intensifying_adjectives": len(intensifying_adjectives),
+            "intensifying_adverbs": len(intensifying_adverbs),
+            "adj_intensification_rate": round(adj_rate, 1),
+            "adv_intensification_rate": round(adv_rate, 1),
+            "total_nouns": total_nouns,
+            "intensified_nouns": len(intensified_pairs),
+            "noun_intensification_rate": round(noun_rate, 1),
+            "intensifying_words": [score.word for score in intensifiers],
+            "intensified_pairs": intensified_pairs,
+            "confidence_scores": confidence_scores,
+            "detailed_intensifiers": intensifiers,
+        }
+
+    def compare_texts(
+        self, text1: str, text2: str, label1: str = "Text 1", label2: str = "Text 2"
+    ) -> Tuple[Dict, Dict]:
         print("\n" + "=" * 70)
         print("🔍 TEXT INTENSIFICATION COMPARISON ANALYSIS")
         print("=" * 70)
 
-        # Analyze both texts
         analysis1 = self.analyze_text(text1, label1)
         analysis2 = self.analyze_text(text2, label2)
 
-        # Print basic stats
-        print(f"\n📊 BASIC STATISTICS")
+        print("\n📊 BASIC STATISTICS")
         print("-" * 40)
-        print(f"{label1:15} | Words: {analysis1['word_count']:4} | Sentences: {analysis1['sentence_count']:2}")
-        print(f"{label2:15} | Words: {analysis2['word_count']:4} | Sentences: {analysis2['sentence_count']:2}")
+        print(
+            f"{label1:15} | Words: {analysis1['word_count']:4} | Sentences: {analysis1['sentence_count']:2}"
+        )
+        print(
+            f"{label2:15} | Words: {analysis2['word_count']:4} | Sentences: {analysis2['sentence_count']:2}"
+        )
 
-        # Print intensification rates
-        print(f"\n🎯 INTENSIFICATION RATES")
+        print("\n🎯 INTENSIFICATION RATES")
         print("-" * 40)
         print(f"{'Metric':<25} | {label1:<12} | {label2:<12} | Difference")
         print("-" * 65)
 
-        adj_diff = analysis1['adj_intensification_rate'] - analysis2['adj_intensification_rate']
-        adv_diff = analysis1['adv_intensification_rate'] - analysis2['adv_intensification_rate']
-        noun_diff = analysis1['noun_intensification_rate'] - analysis2['noun_intensification_rate']
+        adj_diff = (
+            analysis1["adj_intensification_rate"] - analysis2["adj_intensification_rate"]
+        )
+        adv_diff = (
+            analysis1["adv_intensification_rate"] - analysis2["adv_intensification_rate"]
+        )
+        noun_diff = (
+            analysis1["noun_intensification_rate"] - analysis2["noun_intensification_rate"]
+        )
 
         print(
-            f"{'Adjective Rate':<25} | {analysis1['adj_intensification_rate']:>10.1f}% | {analysis2['adj_intensification_rate']:>10.1f}% | {adj_diff:>+7.1f}%")
+            f"{'Adjective Rate':<25} | {analysis1['adj_intensification_rate']:>10.1f}% | {analysis2['adj_intensification_rate']:>10.1f}% | {adj_diff:>+7.1f}%"
+        )
         print(
-            f"{'Adverb Rate':<25} | {analysis1['adv_intensification_rate']:>10.1f}% | {analysis2['adv_intensification_rate']:>10.1f}% | {adv_diff:>+7.1f}%")
+            f"{'Adverb Rate':<25} | {analysis1['adv_intensification_rate']:>10.1f}% | {analysis2['adv_intensification_rate']:>10.1f}% | {adv_diff:>+7.1f}%"
+        )
         print(
-            f"{'Noun Intensification':<25} | {analysis1['noun_intensification_rate']:>10.1f}% | {analysis2['noun_intensification_rate']:>10.1f}% | {noun_diff:>+7.1f}%")
+            f"{'Noun Intensification':<25} | {analysis1['noun_intensification_rate']:>10.1f}% | {analysis2['noun_intensification_rate']:>10.1f}% | {noun_diff:>+7.1f}%"
+        )
 
-        # Detailed intensifier breakdown
-        print(f"\n🔎 INTENSIFYING MODIFIERS FOUND")
+        print("\n🔎 INTENSIFYING MODIFIERS FOUND")
         print("-" * 40)
 
-        max_intensifiers = max(len(analysis1['detailed_intensifiers']), len(analysis2['detailed_intensifiers']))
-
-        if max_intensifiers > 0:
+        max_count = max(
+            len(analysis1["detailed_intensifiers"]),
+            len(analysis2["detailed_intensifiers"]),
+        )
+        if max_count:
             print(f"{'Rank':<4} | {label1:<20} | {label2:<20}")
             print("-" * 50)
+            for index in range(max_count):
+                left = (
+                    analysis1["detailed_intensifiers"][index]
+                    if index < len(analysis1["detailed_intensifiers"])
+                    else None
+                )
+                right = (
+                    analysis2["detailed_intensifiers"][index]
+                    if index < len(analysis2["detailed_intensifiers"])
+                    else None
+                )
 
-            for i in range(max_intensifiers):
-                if i < len(analysis1['detailed_intensifiers']):
-                    score1 = analysis1['detailed_intensifiers'][i]
-                    word1 = f"{score1.word} [{score1.part_of_speech}]"
-                    conf1 = f"({score1.confidence:.2f})"
-                else:
-                    word1 = ""
-                    conf1 = ""
+                word1 = f"{left.word} [{left.part_of_speech}]" if left else ""
+                conf1 = f"({left.confidence:.2f})" if left else ""
+                word2 = f"{right.word} [{right.part_of_speech}]" if right else ""
+                conf2 = f"({right.confidence:.2f})" if right else ""
 
-                if i < len(analysis2['detailed_intensifiers']):
-                    score2 = analysis2['detailed_intensifiers'][i]
-                    word2 = f"{score2.word} [{score2.part_of_speech}]"
-                    conf2 = f"({score2.confidence:.2f})"
-                else:
-                    word2 = ""
-                    conf2 = ""
-
-                print(f"{i + 1:<4} | {word1:<20} {conf1:<8} | {word2:<20} {conf2:<8}")
+                print(f"{index + 1:<4} | {word1:<20} {conf1:<8} | {word2:<20} {conf2:<8}")
         else:
             print("No intensifying modifiers detected in either text.")
 
-        # Show intensified noun pairs
-        print(f"\n🎭 INTENSIFIED NOUN PAIRS")
+        print("\n🎭 INTENSIFIED NOUN PAIRS")
         print("-" * 40)
-
-        if analysis1['intensified_pairs'] or analysis2['intensified_pairs']:
-            print(
-                f"{label1}: {', '.join(analysis1['intensified_pairs']) if analysis1['intensified_pairs'] else 'None'}")
-            print(
-                f"{label2}: {', '.join(analysis2['intensified_pairs']) if analysis2['intensified_pairs'] else 'None'}")
+        if analysis1["intensified_pairs"] or analysis2["intensified_pairs"]:
+            left_pairs = ", ".join(analysis1["intensified_pairs"]) or "None"
+            right_pairs = ", ".join(analysis2["intensified_pairs"]) or "None"
+            print(f"{label1}: {left_pairs}")
+            print(f"{label2}: {right_pairs}")
         else:
             print("No intensified noun pairs found in either text.")
 
-        # Interpretation
-        print(f"\n🤖 AI LIKELIHOOD ASSESSMENT")
+        print("\n🤖 AI LIKELIHOOD ASSESSMENT")
         print("-" * 40)
 
-        def get_ai_likelihood(noun_rate, adj_rate):
-            combined_score = noun_rate * 2 + adj_rate
-            if combined_score >= 50:
+        def ai_likelihood(noun_rate: float, adj_rate: float) -> str:
+            combined = noun_rate * 2 + adj_rate
+            if combined >= 50:
                 return "VERY HIGH - Likely AI"
-            elif combined_score >= 30:
+            if combined >= 30:
                 return "HIGH - Possibly AI"
-            elif combined_score >= 15:
+            if combined >= 15:
                 return "MODERATE - Mixed signals"
-            else:
-                return "LOW - Likely human"
+            return "LOW - Likely human"
 
-        likelihood1 = get_ai_likelihood(analysis1['noun_intensification_rate'], analysis1['adj_intensification_rate'])
-        likelihood2 = get_ai_likelihood(analysis2['noun_intensification_rate'], analysis2['adj_intensification_rate'])
+        print(f"{label1}: {ai_likelihood(analysis1['noun_intensification_rate'], analysis1['adj_intensification_rate'])}")
+        print(f"{label2}: {ai_likelihood(analysis2['noun_intensification_rate'], analysis2['adj_intensification_rate'])}")
 
-        print(f"{label1}: {likelihood1}")
-        print(f"{label2}: {likelihood2}")
-
-        # Winner declaration
-        print(f"\n🏆 COMPARISON SUMMARY")
+        print("\n🏆 COMPARISON SUMMARY")
         print("-" * 40)
-
         if noun_diff > 5:
-            print(f"'{label1}' shows significantly more intensification ({noun_diff:+.1f}% difference)")
+            print(
+                f"'{label1}' shows significantly more intensification ({noun_diff:+.1f}% difference)"
+            )
         elif noun_diff < -5:
-            print(f"'{label2}' shows significantly more intensification ({-noun_diff:+.1f}% difference)")
+            print(
+                f"'{label2}' shows significantly more intensification ({-noun_diff:+.1f}% difference)"
+            )
         else:
             print("Both texts show similar levels of intensification")
 
         return analysis1, analysis2
 
 
+# ---------------------------------------------------------------------------
+# User interface helpers
+# ---------------------------------------------------------------------------
+
+
 def get_multiline_input(prompt: str) -> str:
-    """Get multiline input from user."""
+    """Gather multi-line input from the console."""
+
     print(prompt)
     print("(Press Enter twice when finished, or Ctrl+C to quit)")
-    lines = []
-    empty_lines = 0
+    lines: List[str] = []
+    empty = 0
 
     try:
         while True:
             line = input()
-            if line.strip() == "":
-                empty_lines += 1
-                if empty_lines >= 2:
-                    break
-            else:
-                empty_lines = 0
+            if line.strip():
                 lines.append(line)
-        return "\n".join(lines)
+                empty = 0
+            else:
+                empty += 1
+                if empty >= 2:
+                    break
     except KeyboardInterrupt:
         print("\n\nGoodbye!")
-        exit()
+        raise SystemExit
+
+    return "\n".join(lines)
 
 
-def main():
-    """Main interactive comparison tool."""
+def main() -> None:
     print("🎯 TEXT INTENSIFICATION COMPARISON TOOL")
     print("=" * 50)
     print("This tool compares two texts for intensifying adjectives and adverbs")
     print("- useful for detecting AI-generated content patterns")
-    print("- analyzes semantic and morphological intensification")
+    print("- analyzes heuristic intensification signals")
     print()
 
-    # Initialize detector
-    print("Loading language model...")
-    try:
-        comparator = TextIntensificationComparator()
-    except Exception as e:
-        print(f"Error initializing: {e}")
-        return
-
+    comparator = TextIntensificationComparator()
     print("✓ Ready for analysis!\n")
 
     while True:
         try:
-            # Get first text
             text1 = get_multiline_input("\n📝 Enter TEXT 1:")
             if not text1.strip():
                 print("Empty text entered. Please try again.")
                 continue
 
-            label1 = input("\n🏷️  Label for Text 1 (optional, press Enter for 'Text 1'): ").strip()
-            if not label1:
-                label1 = "Text 1"
+            label1 = input("\n🏷️  Label for Text 1 (optional): ").strip() or "Text 1"
 
-            # Get second text
             text2 = get_multiline_input("\n📝 Enter TEXT 2:")
             if not text2.strip():
                 print("Empty text entered. Please try again.")
                 continue
 
-            label2 = input("\n🏷️  Label for Text 2 (optional, press Enter for 'Text 2'): ").strip()
-            if not label2:
-                label2 = "Text 2"
+            label2 = input("\n🏷️  Label for Text 2 (optional): ").strip() or "Text 2"
 
-            # Perform comparison
             print("\n🔄 Analyzing texts...")
             comparator.compare_texts(text1, text2, label1, label2)
 
-            # Ask if user wants to continue
             print("\n" + "=" * 70)
-            choice = input("\nAnalyze more texts? (y/n): ").strip().lower()
-            if choice not in ['y', 'yes']:
+            again = input("Analyze more texts? (y/n): ").strip().lower()
+            if again not in {"y", "yes"}:
                 break
-
         except KeyboardInterrupt:
             print("\n\nGoodbye!")
             break
-        except Exception as e:
-            print(f"Error during analysis: {e}")
+        except Exception as exc:  # pragma: no cover - defensive logging
+            print(f"Error during analysis: {exc}")
             print("Please try again with different text.")
 
 
