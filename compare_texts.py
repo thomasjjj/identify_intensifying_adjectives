@@ -14,6 +14,7 @@ from typing import Dict, List, Set, Tuple
 
 import numpy as np
 import spacy
+import subprocess
 
 
 @dataclass
@@ -59,15 +60,15 @@ class TextIntensificationComparator:
         self.semantic_threshold = 0.55  # Lowered for better recall
 
     def _load_or_download_spacy_model(self):
-        """Load the required spaCy model or exit with instructions."""
+        """Load the required spaCy model, falling back to smaller models if needed."""
         try:
             nlp = spacy.load("en_core_web_lg")
             print("✓ Loaded en_core_web_lg model")
             return nlp
         except OSError:
-            print("❌ The spaCy model 'en_core_web_lg' is not installed.")
-            print("   Please install it by running: python -m spacy download en_core_web_lg")
-            sys.exit(1)
+            print("⚠️ The spaCy model 'en_core_web_lg' is not installed.")
+            print("   Attempting to load the smaller 'en_core_web_sm' model instead.")
+            print("   For best results, install the large model with: python -m spacy download en_core_web_lg")
             print("⚠️  en_core_web_lg not found, trying en_core_web_sm...")
 
         # Try to load the small model
