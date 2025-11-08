@@ -6,6 +6,10 @@ A Python tool for detecting and comparing intensifying adjectives in texts - par
 
 This tool analyzes text for "intensifying adjectives" - dramatic modifiers that AI models tend to overuse. Research shows that AI-generated text often contains phrases like "unprecedented rise," "alarming trend," and "significant findings" where human writers would use simpler language.
 
+### Project History
+
+The original research question focused narrowly on intensifying adjectives and adverbs: could we draw a clean, heuristic boundary between AI and human prose by only counting dramatic modifiers? Preliminary experiments (and the `evaluate_dataset` metrics) showed that signal alone hovers around random chance (ROC-AUC ≈ 0.5). As a result, the project expanded to harvest broader surface-level cues—sentence structure, discourse markers, repetition, punctuation, numerical density, etc.—all computable without heavy NLP dependencies. The `tuning` pipeline now exports these richer features so we can train classical models or re-weight the heuristics instead of relying solely on intensifiers.
+
 ## Features
 
 - **Multi-layered Detection**: Combines semantic similarity, morphological analysis, and contextual clues

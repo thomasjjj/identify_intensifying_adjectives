@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 import sys
 
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -90,12 +90,28 @@ def probability_from_analysis(analysis: Dict[str, float]) -> float:
     return float(np.clip(combined_score / 100.0, 0.0, 1.0))
 
 
+def sanitize_analysis(
+    analysis: Dict[str, Any],
+    text: str,
+    row_meta: Dict[str, Any],
+) -> Dict[str, Any]:
+    filtered = {
+        key: value
+        for key, value in analysis.items()
+        if key not in {"detailed_intensifiers", "confidence_scores"}
+    }
+    filtered["text"] = text
+    filtered.update(row_meta)
+    return filtered
+
+
 def compute_probabilities(
     df: pd.DataFrame,
     comparator: TextIntensificationComparator,
     desc: str,
-) -> np.ndarray:
+) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
     probs: List[float] = []
+    feature_rows: List[Dict[str, Any]] = []
     for _, row in tqdm(df.iterrows(), total=len(df), desc=desc):
         text = str(row.get("text", ""))
         label = str(row.get("label", ""))
@@ -105,7 +121,13 @@ def compute_probabilities(
             print(f"[WARN] Analysis failed ({exc}); defaulting score to 0.")
             analysis = {"noun_intensification_rate": 0.0, "adj_intensification_rate": 0.0}
         probs.append(probability_from_analysis(analysis))
-    return np.array(probs, dtype=float)
+        meta: Dict[str, Any] = {}
+        if "id" in row and pd.notna(row["id"]):
+            meta["source_id"] = row["id"]
+        if label:
+            meta["original_label"] = label
+        feature_rows.append(sanitize_analysis(analysis, text, meta))
+    return np.array(probs, dtype=float), feature_rows
 
 
 def classification_metrics(y_true: np.ndarray, y_prob: np.ndarray, threshold: float) -> Dict[str, float]:
@@ -168,10 +190,12 @@ def main() -> None:
     comparator = TextIntensificationComparator()
 
     splits = {name: load_split(name, args.subset) for name in ("train", "val", "test")}
-    probabilities = {
-        name: compute_probabilities(df, comparator, f"Scoring {name}")
-        for name, df in splits.items()
-    }
+    probabilities: Dict[str, np.ndarray] = {}
+    feature_exports: Dict[str, List[Dict[str, Any]]] = {}
+    for name, df in splits.items():
+        probs, feature_rows = compute_probabilities(df, comparator, f"Scoring {name}")
+        probabilities[name] = probs
+        feature_exports[name] = feature_rows
 
     y_val = splits["val"]["y"].to_numpy()
     val_probs = probabilities["val"]
@@ -253,6 +277,14 @@ def main() -> None:
             f"Test Confusion Matrix ({label}, normalized)",
             normalize=True,
         )
+
+    safe_makedirs(ARTIFACTS_METRICS)
+    for name, rows in feature_exports.items():
+        if not rows:
+            continue
+        out_path = ARTIFACTS_METRICS / f"features_{name}.csv"
+        pd.DataFrame(rows).to_csv(out_path, index=False)
+        print(f"Saved feature table for {name} to {out_path}")
 
     save_json(ARTIFACTS_METRICS / "report.json", summary)
     print(f"Summary report saved to {ARTIFACTS_METRICS / 'report.json'}")
