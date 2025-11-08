@@ -1,2 +1,7 @@
 numpy
 spacy
+pandas
+scikit-learn
+matplotlib
+kagglehub
+tqdm

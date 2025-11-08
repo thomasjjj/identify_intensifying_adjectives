@@ -95,6 +95,59 @@ Human Sample: LOW - Likely human
 'AI Sample' shows significantly more intensification (+28.6% difference)
 ```
 
+## Dataset Validation & Threshold Tuning
+
+Use the provided offline workflow to benchmark the Kaggle dataset `shamimhasan8/ai-vs-human-text-dataset` with the existing comparator heuristics.
+
+### End-to-End Workflow
+
+```bash
+# 1. Install dependencies (includes pandas, sklearn, matplotlib, kagglehub, tqdm)
+python -m pip install -r requirements.txt
+
+# 2. Launch the orchestrator for a one-click pipeline (fetch -> evaluate -> auto-tune -> optional tests)
+python -m tuning.orchestrator --seed 42
+
+#    Add --run-tests to execute the regression suite at the end:
+python -m tuning.orchestrator --seed 42 --run-tests
+```
+
+Manual control is still available via the `tuning/` package:
+
+```bash
+# Download/split the Kaggle dataset (requires Kaggle API credentials)
+python -m tuning.dataset_fetch --seed 42
+
+# Evaluate the comparator, produce plots/metrics, and refresh the threshold sweep
+python -m tuning.evaluate_dataset --seed 42 [--subset optional_filter]
+
+# Auto-select a threshold (saves to artifacts/metrics/chosen_threshold.json)
+python -m tuning.tune_threshold --auto --metric f1 --apply-test --save
+
+# Interactive exploration (type 'grid' for top suggestions)
+python -m tuning.tune_threshold
+```
+
+Artifacts land under:
+- `data/raw|interim|processed/` for the downloaded CSV and stratified train/val/test splits
+- `artifacts/plots/` for ROC, PR, and confusion matrix PNGs
+- `artifacts/metrics/` for `threshold_sweep_val.csv`, `test_eval_*.json`, `report.json`, and any saved `chosen_threshold.json`
+- `artifacts/models/` (reserved for future serialized models)
+
+### Interactive Threshold Tuning Tips
+1. Run `python tune_threshold.py`.
+2. Enter `grid` to display the top-10 thresholds by macro-F1 and Youden’s J (sourced from `threshold_sweep_val.csv` or computed on demand).
+3. Provide a numeric threshold (e.g., `0.42`) to see validation metrics, raw/normalized confusion matrices, and diagnostics.
+4. When prompted, type `y` to evaluate the same threshold on the test split or to persist it into `artifacts/metrics/chosen_threshold.json`.
+5. Press `Ctrl+C` or type `quit` to exit safely.
+
+### Test Execution Note (Windows)
+`tests.py` prints Unicode emoji. If you see `UnicodeEncodeError: 'charmap' codec can't encode character`, rerun tests with UTF-8 output:
+```powershell
+set PYTHONIOENCODING=utf-8
+python -m unittest tests.py -v
+```
+
 ## How It Works
 
 ### Detection Methods
@@ -183,11 +236,12 @@ Unit tests are automated checks that verify your code works correctly. Think of 
 The test suite includes 13 different tests covering various scenarios:
 
 ```bash
-# Run all tests
+# Run all tests directly
 python tests.py
 
-# Or run with more detailed output
+# Or run with more detailed output / via the orchestrator helpers
 python -m unittest tests.py -v
+python -m tuning.orchestrator --run-tests  # also runs fetch/eval/tune beforehand
 ```
 
 **Sample Test Output:**
