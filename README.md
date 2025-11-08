@@ -110,7 +110,7 @@ Use the provided offline workflow to benchmark the Kaggle dataset `shamimhasan8/
 python -m pip install -r requirements.txt
 
 # 2. Launch the orchestrator for a one-click pipeline (fetch -> evaluate -> auto-tune -> optional tests)
-python -m tuning.orchestrator --seed 42
+python -m tuning.orchestrator --seed 42 [--max-secondary-rows 50000]
 
 #    Add --run-tests to execute the regression suite at the end:
 python -m tuning.orchestrator --seed 42 --run-tests
@@ -120,7 +120,7 @@ Manual control is still available via the `tuning/` package:
 
 ```bash
 # Download/split the Kaggle dataset (requires Kaggle API credentials)
-python -m tuning.dataset_fetch --seed 42
+python -m tuning.dataset_fetch --seed 42 --max-secondary-rows 75000
 
 # Evaluate the comparator, produce plots/metrics, and refresh the threshold sweep
 python -m tuning.evaluate_dataset --seed 42 [--subset optional_filter]
@@ -130,7 +130,16 @@ python -m tuning.tune_threshold --auto --metric f1 --apply-test --save
 
 # Interactive exploration (type 'grid' for top suggestions)
 python -m tuning.tune_threshold
+
+# Train a logistic-regression baseline on the engineered features
+python -m tuning.train_linear --cv-folds 5 --save-model artifacts/models/logreg.joblib
 ```
+
+### Datasets Included
+
+- **Primary**: `shamimhasan8/ai-vs-human-text-dataset` (~1k labeled rows with prompts/metadata).
+- **Secondary (new)**: `shanegerami/ai-vs-human-text` (~500k essays). The fetcher samples this large corpus via `--max-secondary-rows` (default 50k) to balance disk usage and runtime—set it to `0` to ingest all rows if you have enough space, or to a smaller number when prototyping.
+- Both sources are merged, deduplicated on `text`, and tagged with `data_source` before stratified splits land in `data/processed/`.
 
 Artifacts land under:
 - `data/raw|interim|processed/` for the downloaded CSV and stratified train/val/test splits

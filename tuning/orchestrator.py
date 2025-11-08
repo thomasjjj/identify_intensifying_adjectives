@@ -21,6 +21,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional subset string passed to evaluate_dataset (filters prompt/model columns).",
     )
     parser.add_argument(
+        "--max-secondary-rows",
+        type=int,
+        default=50000,
+        help="Maximum rows sampled from the large AI-vs-human dataset (0 = use all).",
+    )
+    parser.add_argument(
         "--tune-metric",
         choices=["f1", "youden_j", "mcc"],
         default="f1",
@@ -53,6 +59,8 @@ def main() -> None:
         "tuning.dataset_fetch",
         "--seed",
         str(args.seed),
+        "--max-secondary-rows",
+        str(args.max_secondary_rows),
     ]
     run_step("Fetching and preprocessing dataset...", fetch_cmd)
 
